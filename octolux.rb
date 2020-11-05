@@ -3,9 +3,15 @@
 
 require_relative 'boot'
 
+
+solcast = Solcast.new(api_key: CONFIG['solcast']['api_key'],
+                      resource_id: CONFIG['solcast']['resource_id'])
+solcast.update if solcast.stale?
+
 octopus = Octopus.new(product_code: CONFIG['octopus']['product_code'],
                       tariff_code: CONFIG['octopus']['tariff_code'])
 # if we have less than 6 hours of future $octopus tariff data, update it
+
 octopus.update if octopus.stale?
 unless octopus.price
   LOGGER.fatal 'No current Octopus price, aborting'
