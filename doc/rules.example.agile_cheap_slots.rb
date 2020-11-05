@@ -1,11 +1,46 @@
+require 'net/http'
+require 'uri'
+
+
+urioff = URI.parse("https://maker.ifttt.com/trigger/charge_off/with/key/TBD")
+uri32 = URI.parse("https://maker.ifttt.com/trigger/charge_32/with/key/TBD")
+
+
+req_options = {
+  use_ssl: uri32.scheme == "https",
+}
+
+# Checks to see if car needs charging - put in seperate config2.ini as I figured it could be replaced by a trigger, there is probably a much more efficient way but I don't know ruby.
+chargecar = CONFIG2['rules']['carcharge'].to_i
+LOGGER.info "Chargecar = #{chargecar}"
+
+# Checks how much Solar (need to bias the date so as to not change to tomorrow after midnight.
+
+now = Time.at(1800 * (Time.now.to_i / 1800))
+LOGGER.info "Ben Check NOW = #{now}"
+if (now.hour < 06) 
+	todayortom = Date.today
+else
+	todayortom = Date.today+1
+end
+LOGGER.info "Solar Date = #{todayortom}"
+soltom = solcast.day(todayortom).values.sum / 2
+LOGGER.info "Solar kWh tomorrow = #{soltom.round(2)} kWh"
+
 # frozen_string_literal: true
 
 LOGGER.info "Current Price = #{octopus.price}p"
 
 required_soc = CONFIG['rules']['required_soc'].to_i
+solar_soc = (16 - soltom) / 0.12
+LOGGER.info "Raw Solar Calc (16 - soltom) / 0.12 = #{solar_soc.round(2)}%"
+solar_soc = required_soc if solar_soc < 30 
+solar_soc = 100 if solar_soc > 100
+solar_soc = 100 if Date.today.sunday? && now.hour < 06
+required_soc = solar_soc
 
 if (soc = ls.inputs['soc'])
-  LOGGER.info "SOC = #{soc}% / #{required_soc}%"
+  LOGGER.info "SOC = #{soc}% / #{required_soc.round(0)}% Required"
 else
   LOGGER.warn "Can't get SOC % from server.rb, assuming 10%"
   soc = 10
@@ -13,23 +48,27 @@ end
 
 slots = octopus.prices.sort_by { |_k, v| v }
 
-now = Time.at(1800 * (Time.now.to_i / 1800))
 
 f = Pathname.new('cheap_slot_data.json')
 data = f.readable? ? JSON.parse(f.read) : {}
 
 # charge_slots are worked out each evening after 6pm, when we have new Octopus price data.
 evening = now.hour >= 18
+LOGGER.info "Ben Check evening = #{evening}"
+
 stale = data['updated_at'].nil? || Time.now - Time.parse(data['updated_at']) > (23 * 60 * 60)
 have_prices = octopus.prices.count > 20
 if (evening || stale) && have_prices
   battery_count = CONFIG['lxp']['batteries'].to_i
   charge_rate = [3, battery_count].min
-
   system_size = 2.4 * battery_count # kWh per battery
   # TODO: bias this based on solcast?
   charge_size = system_size * ((required_soc - soc) / 100.0)
+# charge_size = charge_size - (soltom - 12)
   charge_size = 0 if charge_size.negative?
+# charge_size = charge_size + 10 if chargecar == 1
+# charge_size = charge_size + 25 if carcharge==1
+  LOGGER.info "Ben Check chargesize = #{charge_size}"
   hours_required = charge_size / charge_rate.to_f
   slots_required = (hours_required * 2).ceil # half-hourly Agile periods
 
@@ -70,8 +109,8 @@ multiplier = if soc < 30 then 1.6
              else
                1.1
              end
-min_discharge_price = max_charge_price * multiplier
-min_discharge_price = [min_discharge_price, CONFIG['rules']['min_discharge'].to_f].max.round(4)
+# min_discharge_price = max_charge_price * multiplier
+min_discharge_price = CONFIG['rules']['min_discharge']
 discharge_slots = slots.delete_if { |_k, v| v <= min_discharge_price }.to_h
 # discharge_slots.sort.each { |time, price| LOGGER.info "Discharge: #{time} @ #{price}p" }
 
@@ -83,6 +122,9 @@ idle.sort.each { |time, price| LOGGER.info "Idle: #{time} @ #{price}p" }
 # enable ac_charge/discharge if any of the keys match the current half-hour period
 ac_charge = charge_slots.any? { |time, _price| time == now }
 discharge = discharge_slots.any? { |time, _price| time == now }
+if (chargecar == 1 && now.hour <= 5)
+discharge = false
+end
 
 emergency_soc = CONFIG['rules']['emergency_soc'] || 50
 # if a peak period is approaching and SOC is low, start emergency charge
@@ -92,6 +134,16 @@ if soc < emergency_soc.to_i && octopus.prices.values.take(4).max > 15 && octopus
 end
 
 LOGGER.info "ac_charge = #{ac_charge} ; discharge = #{discharge} (> #{min_discharge_price}p)"
+
+if (discharge == true)
+request = Net::HTTP::Post.new(urioff) 
+else
+request = Net::HTTP::Post.new(uri32) 
+end
+
+response = Net::HTTP.start(uri32.hostname, uri32.port, req_options) do |http|
+	http.request(request)
+end
 
 discharge_pct = discharge ? 100 : 0
 r = (lc.discharge_pct = discharge_pct)
