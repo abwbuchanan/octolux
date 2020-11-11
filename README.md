@@ -1,9 +1,12 @@
 This is my blundering attempt to modify the great work done by celsworth. I've never used RUBY before and can't say I love it. I've made some tweaks that some may like and may even be able to build on and improve for me and the rest of the community.
 
 My main aims were to: 
-include the SOLCAST data so as to only top up the minimum at night - the bare bones were already there, I've just butchere dthem to work for me. Solcast accuracy around 90%
-include the ability to use my EV charger without xdrainign the batteries - some success but room for improvement.
-included a full charge for a sunday, as that's washing!
+
+Include the SOLCAST data so as to only top up the minimum at night - the bare bones were already there, I've just butchered them to work for me. Solcast accuracy around 90%
+
+Include the ability to use my EV charger without xdrainign the batteries - some success but room for improvement.
+
+Included a full charge for a sunday, as that's washing!
 
 # LuxPower Inverter / Octopus Time-of-use Tariff Integration
 
